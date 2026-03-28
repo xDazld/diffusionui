@@ -208,7 +208,7 @@ class DiffusionUI(tk.Tk):
             ("height_var", "Height:", int, 1, 4, 5, 0, 2048, 8),
             ("width_var", "Width:", int, 2, 4, 5, 0, 2048, 8),
             ("num_images_var", "Images per Prompt:", int, 3, 0, 1, 0, 10, 8),
-            ("seed_var", "Seed (0 = random):", int, 3, 2, 3, 0, 2147483647, 12),
+                          ("seed_var", "Seed:", int, 3, 2, 3, 0, 2147483647, 12),
             ("strength_var", "Strength (0-1):", float, 3, 4, 5, 0.0, 1.0, 8),
             ("max_seq_length_var", "Max Sequence Length:", int, 4, 0, 1, 0, 512, 12), ]
 
