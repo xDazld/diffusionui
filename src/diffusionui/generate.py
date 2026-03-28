@@ -62,7 +62,7 @@ class ImageGenerator:
             prompt: str,
             status_callback: Callable[[str], None],
             **kwargs
-    ) -> Image.Image:
+    ) -> list[Image.Image]:
         self._ensure_pipeline(status_callback=status_callback)
         assert self.pipeline is not None
         status_callback("Generating image…")
@@ -71,7 +71,9 @@ class ImageGenerator:
         image_tensor = self.pipeline.generate(prompt, **gen_params)
         print("Generation done")
         status_callback("")
-        return Image.fromarray(image_tensor.data[0])
+
+        # Convert tensor data to PIL images and return as list
+        return [Image.fromarray(img) for img in image_tensor.data]
 
 
 class DiffusionUI(tk.Tk):
@@ -80,7 +82,7 @@ class DiffusionUI(tk.Tk):
             ) -> None:
         super().__init__()
         self.title("Diffusion UI")
-        self.geometry("900x900")
+        self.geometry("1000x1100")
 
         self.available_models = get_available_models()
         self.generator = ImageGenerator()
@@ -96,28 +98,35 @@ class DiffusionUI(tk.Tk):
 
         # Main controls frame
         controls = ttk.Frame(root)
-        controls.pack(fill="x")
+        controls.pack(fill="x", pady=(0, 8))
 
-        ttk.Label(controls, text="Prompt:").grid(row=0, column=0, sticky="w")
+        ttk.Label(controls, text="Prompt:").grid(row=0, column=0, sticky="nw", padx=(0, 8))
 
         self.prompt_var = tk.StringVar(value="sailing ship in storm by Rembrandt")
-        self.prompt_entry = ttk.Entry(controls, textvariable=self.prompt_var)
-        self.prompt_entry.grid(row=0, column=1, sticky="ew", padx=(8, 8))
+        self.prompt_text = tk.Text(controls, height=4, width=60, wrap="word")
+        self.prompt_text.grid(row=0, column=1, sticky="ew", padx=(0, 8))
+        self.prompt_text.insert("1.0", self.prompt_var.get())
 
-        ttk.Label(controls, text="Device:").grid(row=0, column=2, sticky="e")
+        device_frame = ttk.Frame(controls)
+        device_frame.grid(row=0, column=2, sticky="n", padx=(0, 8))
+
+        ttk.Label(device_frame, text="Device:").pack(side="left", padx=(0, 8))
         self.device_var = tk.StringVar(value="CPU")
-        self.device_combo = ttk.Combobox(controls, textvariable=self.device_var,
-                                         values=["CPU", "GPU"], state="readonly", width=6)
-        self.device_combo.grid(row=0, column=3, padx=(8, 8))
+        self.device_combo = ttk.Combobox(device_frame, textvariable=self.device_var,
+                                         values=["CPU", "GPU"], state="readonly", width=8)
+        self.device_combo.pack(side="left")
 
-        ttk.Label(controls, text="Model:").grid(row=0, column=4, sticky="e")
+        model_frame = ttk.Frame(controls)
+        model_frame.grid(row=0, column=3, sticky="ne", padx=(0, 8))
+
+        ttk.Label(model_frame, text="Model:").pack(side="left", padx=(0, 8))
         self.model_var = tk.StringVar(value=MODEL_ID.replace("OpenVINO/", ""))
-        self.model_combo = ttk.Combobox(controls, textvariable=self.model_var,
-                                        values=self.available_models, state="readonly", width=30)
-        self.model_combo.grid(row=0, column=5, sticky="ew", padx=(8, 8))
+        self.model_combo = ttk.Combobox(model_frame, textvariable=self.model_var,
+                                        values=self.available_models, state="readonly", width=28)
+        self.model_combo.pack(side="left")
 
         self.generate_button = ttk.Button(controls, text="Generate", command=self._start_generation)
-        self.generate_button.grid(row=0, column=6, padx=(8, 0))
+        self.generate_button.grid(row=0, column=4, sticky="n", padx=(8, 0))
 
         controls.columnconfigure(1, weight=1)
 
@@ -131,10 +140,11 @@ class DiffusionUI(tk.Tk):
                                       width=8)
         self.steps_spin.grid(row=0, column=1, sticky="w", padx=(8, 8))
 
-        ttk.Label(params_frame, text="Negative Prompt:").grid(row=0, column=2, sticky="e")
+        ttk.Label(params_frame, text="Negative Prompt:").grid(row=0, column=2, sticky="nw",
+                                                              padx=(0, 8))
         self.negative_prompt_var = tk.StringVar(value="")
-        self.negative_prompt_entry = ttk.Entry(params_frame, textvariable=self.negative_prompt_var)
-        self.negative_prompt_entry.grid(row=0, column=3, sticky="ew", padx=(8, 8))
+        self.negative_prompt_text = tk.Text(params_frame, height=2, width=40, wrap="word")
+        self.negative_prompt_text.grid(row=0, column=3, sticky="ew", padx=(0, 8))
 
         ttk.Label(params_frame, text="Guidance Scale:").grid(row=0, column=4, sticky="e")
         self.guidance_scale_var = tk.StringVar(value="")
@@ -142,16 +152,16 @@ class DiffusionUI(tk.Tk):
                                                textvariable=self.guidance_scale_var, width=8)
         self.guidance_scale_spin.grid(row=0, column=5, padx=(8, 8))
 
-        ttk.Label(params_frame, text="Prompt 2:").grid(row=1, column=0, sticky="w")
+        ttk.Label(params_frame, text="Prompt 2:").grid(row=1, column=0, sticky="nw", padx=(0, 8))
         self.prompt_2_var = tk.StringVar(value="")
-        self.prompt_2_entry = ttk.Entry(params_frame, textvariable=self.prompt_2_var)
-        self.prompt_2_entry.grid(row=1, column=1, sticky="ew", padx=(8, 8))
+        self.prompt_2_text = tk.Text(params_frame, height=2, width=40, wrap="word")
+        self.prompt_2_text.grid(row=1, column=1, sticky="ew", padx=(0, 8))
 
-        ttk.Label(params_frame, text="Negative Prompt 2:").grid(row=1, column=2, sticky="e")
+        ttk.Label(params_frame, text="Negative Prompt 2:").grid(row=1, column=2, sticky="nw",
+                                                                padx=(0, 8))
         self.negative_prompt_2_var = tk.StringVar(value="")
-        self.negative_prompt_2_entry = ttk.Entry(params_frame,
-                                                 textvariable=self.negative_prompt_2_var)
-        self.negative_prompt_2_entry.grid(row=1, column=3, sticky="ew", padx=(8, 8))
+        self.negative_prompt_2_text = tk.Text(params_frame, height=2, width=40, wrap="word")
+        self.negative_prompt_2_text.grid(row=1, column=3, sticky="ew", padx=(0, 8))
 
         ttk.Label(params_frame, text="Height:").grid(row=1, column=4, sticky="e")
         self.height_var = tk.StringVar(value="")
@@ -159,16 +169,16 @@ class DiffusionUI(tk.Tk):
                                        width=8)
         self.height_spin.grid(row=1, column=5, sticky="w", padx=(8, 8))
 
-        ttk.Label(params_frame, text="Prompt 3:").grid(row=2, column=0, sticky="w")
+        ttk.Label(params_frame, text="Prompt 3:").grid(row=2, column=0, sticky="nw", padx=(0, 8))
         self.prompt_3_var = tk.StringVar(value="")
-        self.prompt_3_entry = ttk.Entry(params_frame, textvariable=self.prompt_3_var)
-        self.prompt_3_entry.grid(row=2, column=1, sticky="ew", padx=(8, 8))
+        self.prompt_3_text = tk.Text(params_frame, height=2, width=40, wrap="word")
+        self.prompt_3_text.grid(row=2, column=1, sticky="ew", padx=(0, 8))
 
-        ttk.Label(params_frame, text="Negative Prompt 3:").grid(row=2, column=2, sticky="e")
+        ttk.Label(params_frame, text="Negative Prompt 3:").grid(row=2, column=2, sticky="nw",
+                                                                padx=(0, 8))
         self.negative_prompt_3_var = tk.StringVar(value="")
-        self.negative_prompt_3_entry = ttk.Entry(params_frame,
-                                                 textvariable=self.negative_prompt_3_var)
-        self.negative_prompt_3_entry.grid(row=2, column=3, sticky="ew", padx=(8, 8))
+        self.negative_prompt_3_text = tk.Text(params_frame, height=2, width=40, wrap="word")
+        self.negative_prompt_3_text.grid(row=2, column=3, sticky="ew", padx=(0, 8))
 
         ttk.Label(params_frame, text="Width:").grid(row=2, column=4, sticky="e")
         self.width_var = tk.StringVar(value="")
@@ -207,20 +217,19 @@ class DiffusionUI(tk.Tk):
         self.status_var = tk.StringVar(value="Ready")
         ttk.Label(root, textvariable=self.status_var).pack(anchor="w", pady=(10, 8))
 
-        preview_frame = ttk.LabelFrame(root, text="Image", padding=8)
-        preview_frame.pack(fill="both", expand=True)
+        self.preview_frame = ttk.LabelFrame(root, text="Images", padding=8)
+        self.preview_frame.pack(fill="both", expand=True)
 
-        self.preview_label = ttk.Label(preview_frame, anchor="center")
-        self.preview_label.pack(fill="both", expand=True)
+        self.preview_photos: list[ImageTk.PhotoImage] = []
 
-        self.prompt_entry.focus_set()
-        self.bind("<Return>", lambda
+        self.prompt_text.focus_set()
+        self.bind("<Control-Return>", lambda
             _event: self._start_generation())
 
     def _start_generation(
             self
             ) -> None:
-        prompt = self.prompt_var.get().strip()
+        prompt = self.prompt_text.get("1.0", "end-1c").strip()
         if not prompt:
             messagebox.showwarning("Missing prompt", "Please enter a prompt.")
             return
@@ -237,18 +246,30 @@ class DiffusionUI(tk.Tk):
         kwargs = {}
         if self.steps_var.get().strip():
             kwargs["num_inference_steps"] = int(self.steps_var.get())
-        if self.negative_prompt_var.get().strip():
-            kwargs["negative_prompt"] = self.negative_prompt_var.get().strip()
+
+        negative_prompt = self.negative_prompt_text.get("1.0", "end-1c").strip()
+        if negative_prompt:
+            kwargs["negative_prompt"] = negative_prompt
+        
         if self.guidance_scale_var.get().strip():
             kwargs["guidance_scale"] = float(self.guidance_scale_var.get())
-        if self.prompt_2_var.get().strip():
-            kwargs["prompt_2"] = self.prompt_2_var.get().strip()
-        if self.prompt_3_var.get().strip():
-            kwargs["prompt_3"] = self.prompt_3_var.get().strip()
-        if self.negative_prompt_2_var.get().strip():
-            kwargs["negative_prompt_2"] = self.negative_prompt_2_var.get().strip()
-        if self.negative_prompt_3_var.get().strip():
-            kwargs["negative_prompt_3"] = self.negative_prompt_3_var.get().strip()
+
+        prompt_2 = self.prompt_2_text.get("1.0", "end-1c").strip()
+        if prompt_2:
+            kwargs["prompt_2"] = prompt_2
+
+        prompt_3 = self.prompt_3_text.get("1.0", "end-1c").strip()
+        if prompt_3:
+            kwargs["prompt_3"] = prompt_3
+
+        negative_prompt_2 = self.negative_prompt_2_text.get("1.0", "end-1c").strip()
+        if negative_prompt_2:
+            kwargs["negative_prompt_2"] = negative_prompt_2
+
+        negative_prompt_3 = self.negative_prompt_3_text.get("1.0", "end-1c").strip()
+        if negative_prompt_3:
+            kwargs["negative_prompt_3"] = negative_prompt_3
+        
         if self.height_var.get().strip():
             kwargs["height"] = int(self.height_var.get())
         if self.width_var.get().strip():
@@ -273,10 +294,10 @@ class DiffusionUI(tk.Tk):
             **kwargs
             ) -> None:
         try:
-            pil_image = self.generator.generate_image(prompt,
-                                                      status_callback=self._set_status_from_worker,
-                                                      **kwargs)
-            self.after(0, self._on_generation_success, pil_image)
+            images = self.generator.generate_image(prompt,
+                                                   status_callback=self._set_status_from_worker,
+                                                   **kwargs)
+            self.after(0, self._on_generation_success, images)
         except Exception as error:  # noqa: BLE001 - surface any generation failure in the UI
             self.after(0, self._on_generation_error, error)
 
@@ -288,10 +309,43 @@ class DiffusionUI(tk.Tk):
 
     def _on_generation_success(
             self,
-            image: Image.Image
+            images: list[Image.Image]
             ) -> None:
-        self.preview_photo = ImageTk.PhotoImage(image)
-        self.preview_label.config(image=self.preview_photo)
+        if not images:
+            self.status_var.set("No images generated")
+            self.generate_button.config(state=tk.NORMAL)
+            return
+
+        # Clear existing preview content
+        for widget in self.preview_frame.winfo_children():
+            widget.destroy()
+
+        # Calculate grid layout (prefer square-ish grids)
+        num_images = len(images)
+        cols = int(num_images ** 0.5)
+        rows = (num_images + cols - 1) // cols
+
+        # Store PhotoImage references to prevent garbage collection
+        self.preview_photos = []
+
+        # Create a grid of image labels
+        for idx, img in enumerate(images):
+            row = idx // cols
+            col = idx % cols
+
+            # Convert PIL image to PhotoImage
+            photo = ImageTk.PhotoImage(img)
+            self.preview_photos.append(photo)
+
+            # Create label with the image
+            label = ttk.Label(self.preview_frame, image=photo)
+            label.grid(row=row, column=col, padx=4, pady=4, sticky="nsew")
+
+        # Configure grid weights for even distribution
+        for i in range(rows):
+            self.preview_frame.grid_rowconfigure(i, weight=1)
+        for i in range(cols):
+            self.preview_frame.grid_columnconfigure(i, weight=1)
 
         self.status_var.set("Done")
         self.generate_button.config(state=tk.NORMAL)
