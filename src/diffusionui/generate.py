@@ -150,7 +150,7 @@ class DiffusionUI(tk.Tk):
         self.guidance_scale_var = tk.StringVar(value="")
         self.guidance_scale_spin = ttk.Spinbox(params_frame, from_=0.0, to=20.0,
                                                textvariable=self.guidance_scale_var, width=8)
-        self.guidance_scale_spin.grid(row=0, column=5, padx=(8, 8))
+        self.guidance_scale_spin.grid(row=0, column=5, sticky="w", padx=(8, 8))
 
         ttk.Label(params_frame, text="Prompt 2:").grid(row=1, column=0, sticky="nw", padx=(0, 8))
         self.prompt_2_var = tk.StringVar(value="")
@@ -184,7 +184,7 @@ class DiffusionUI(tk.Tk):
         self.width_var = tk.StringVar(value="")
         self.width_spin = ttk.Spinbox(params_frame, from_=0, to=2048, textvariable=self.width_var,
                                       width=8)
-        self.width_spin.grid(row=2, column=5, padx=(8, 8))
+        self.width_spin.grid(row=2, column=5, sticky="w", padx=(8, 8))
 
         ttk.Label(params_frame, text="Images per Prompt:").grid(row=3, column=0, sticky="w")
         self.num_images_var = tk.StringVar(value="")
@@ -196,7 +196,7 @@ class DiffusionUI(tk.Tk):
         self.seed_var = tk.StringVar(value="")
         self.seed_spin = ttk.Spinbox(params_frame, from_=0, to=2147483647,
                                      textvariable=self.seed_var, width=12)
-        self.seed_spin.grid(row=3, column=3, padx=(8, 8))
+        self.seed_spin.grid(row=3, column=3, sticky="w", padx=(8, 8))
 
         ttk.Label(params_frame, text="Strength (0-1):").grid(row=3, column=4, sticky="e")
         self.strength_var = tk.StringVar(value="")
@@ -208,11 +208,19 @@ class DiffusionUI(tk.Tk):
         self.max_seq_length_var = tk.StringVar(value="")
         self.max_seq_length_spin = ttk.Spinbox(params_frame, from_=0, to=512,
                                                textvariable=self.max_seq_length_var, width=12)
-        self.max_seq_length_spin.grid(row=4, column=1, padx=(8, 8))
+        self.max_seq_length_spin.grid(row=4, column=1, sticky="w", padx=(8, 8))
 
         params_frame.columnconfigure(1, weight=1)
         params_frame.columnconfigure(3, weight=1)
         params_frame.columnconfigure(5, weight=1)
+
+        # Set minimum widths to prevent columns from squishing
+        params_frame.columnconfigure(0, minsize=120)
+        params_frame.columnconfigure(1, minsize=200)
+        params_frame.columnconfigure(2, minsize=140)
+        params_frame.columnconfigure(3, minsize=200)
+        params_frame.columnconfigure(4, minsize=140)
+        params_frame.columnconfigure(5, minsize=100)
 
         self.status_var = tk.StringVar(value="Ready")
         ttk.Label(root, textvariable=self.status_var).pack(anchor="w", pady=(10, 8))
