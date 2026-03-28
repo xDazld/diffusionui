@@ -95,7 +95,67 @@ class DiffusionUI(tk.Tk):
         self.generator = ImageGenerator()
         self.preview_photo: ImageTk.PhotoImage | None = None
 
+        # Initialize dynamically created attributes to None so IDE recognizes them
+        self.steps_var: tk.StringVar = tk.StringVar(value="")
+        self.negative_prompt_text: tk.Text = tk.Text(self)  # type: ignore
+        self.guidance_scale_var: tk.StringVar = tk.StringVar(value="")
+        self.prompt_2_text: tk.Text = tk.Text(self)  # type: ignore
+        self.negative_prompt_2_text: tk.Text = tk.Text(self)  # type: ignore
+        self.height_var: tk.StringVar = tk.StringVar(value="")
+        self.width_var: tk.StringVar = tk.StringVar(value="")
+        self.prompt_3_text: tk.Text = tk.Text(self)  # type: ignore
+        self.negative_prompt_3_text: tk.Text = tk.Text(self)  # type: ignore
+        self.num_images_var: tk.StringVar = tk.StringVar(value="")
+        self.seed_var: tk.StringVar = tk.StringVar(value="")
+        self.strength_var: tk.StringVar = tk.StringVar(value="")
+        self.max_seq_length_var: tk.StringVar = tk.StringVar(value="")
+        self.prompt_text: tk.Text = tk.Text(self)  # type: ignore
+        self.device_var: tk.StringVar = tk.StringVar(value="")
+        self.device_combo: ttk.Combobox
+        self.model_var: tk.StringVar = tk.StringVar(value="")
+        self.model_combo: ttk.Combobox
+        self.generate_button: ttk.Button
+        self.status_var: tk.StringVar = tk.StringVar(value="")
+        self.progress_var: tk.DoubleVar = tk.DoubleVar(value=0)
+        self.progress_bar: ttk.Progressbar
+        self.preview_frame: ttk.LabelFrame
+        self.preview_photos: list[ImageTk.PhotoImage] = []
+
         self._build_layout()
+
+    @staticmethod
+    def _create_spinbox_field(
+            frame,
+            label_text: str,
+            var,
+            from_val: float,
+            to_val: float,
+            width: int,
+            row: int,
+            col_label: int,
+            col_widget: int,
+            sticky: str = "w"
+    ) -> None:
+        """Helper to create a label + spinbox field."""
+        ttk.Label(frame, text=label_text).grid(row=row, column=col_label, sticky="e")
+        spinbox = ttk.Spinbox(frame, from_=from_val, to=to_val, textvariable=var, width=width)
+        spinbox.grid(row=row, column=col_widget, sticky=sticky, padx=(8, 8))
+
+    @staticmethod
+    def _create_text_field(
+            frame,
+            label_text: str,
+            height: int,
+            width: int,
+            row: int,
+            col_label: int,
+            col_widget: int
+    ) -> tk.Text:
+        """Helper to create a label + text field."""
+        ttk.Label(frame, text=label_text).grid(row=row, column=col_label, sticky="nw", padx=(0, 8))
+        text_widget = tk.Text(frame, height=height, width=width, wrap="word")
+        text_widget.grid(row=row, column=col_widget, sticky="ew", padx=(0, 8))
+        return text_widget
 
     def _build_layout(
             self
@@ -141,81 +201,35 @@ class DiffusionUI(tk.Tk):
         params_frame = ttk.LabelFrame(root, text="Optional Parameters", padding=8)
         params_frame.pack(fill="x", pady=(10, 0))
 
-        ttk.Label(params_frame, text="Steps:").grid(row=0, column=0, sticky="w")
-        self.steps_var = tk.StringVar(value="")
-        self.steps_spin = ttk.Spinbox(params_frame, from_=1, to=100, textvariable=self.steps_var,
-            width=8)
-        self.steps_spin.grid(row=0, column=1, sticky="w", padx=(8, 8))
+        # Define parameters with their properties: (attr_name, label, type, row, col_label,
+        # col_widget, from, to, width, height)
+        spinbox_params = [("steps_var", "Steps:", int, 0, 0, 1, 1, 100, 8),
+            ("guidance_scale_var", "Guidance Scale:", float, 0, 4, 5, 0.0, 20.0, 8),
+            ("height_var", "Height:", int, 1, 4, 5, 0, 2048, 8),
+            ("width_var", "Width:", int, 2, 4, 5, 0, 2048, 8),
+            ("num_images_var", "Images per Prompt:", int, 3, 0, 1, 0, 10, 8),
+            ("seed_var", "Seed (0 = random):", int, 3, 2, 3, 0, 2147483647, 12),
+            ("strength_var", "Strength (0-1):", float, 3, 4, 5, 0.0, 1.0, 8),
+            ("max_seq_length_var", "Max Sequence Length:", int, 4, 0, 1, 0, 512, 12), ]
 
-        ttk.Label(params_frame, text="Negative Prompt:").grid(row=0, column=2, sticky="nw",
-            padx=(0, 8))
-        self.negative_prompt_var = tk.StringVar(value="")
-        self.negative_prompt_text = tk.Text(params_frame, height=2, width=40, wrap="word")
-        self.negative_prompt_text.grid(row=0, column=3, sticky="ew", padx=(0, 8))
+        text_params = [("negative_prompt_text", "Negative Prompt:", 0, 2, 3),
+            ("prompt_2_text", "Prompt 2:", 1, 0, 1),
+            ("negative_prompt_2_text", "Negative Prompt 2:", 1, 2, 3),
+            ("prompt_3_text", "Prompt 3:", 2, 0, 1),
+            ("negative_prompt_3_text", "Negative Prompt 3:", 2, 2, 3), ]
 
-        ttk.Label(params_frame, text="Guidance Scale:").grid(row=0, column=4, sticky="e")
-        self.guidance_scale_var = tk.StringVar(value="")
-        self.guidance_scale_spin = ttk.Spinbox(params_frame, from_=0.0, to=20.0,
-            textvariable=self.guidance_scale_var, width=8, )
-        self.guidance_scale_spin.grid(row=0, column=5, sticky="w", padx=(8, 8))
+        # Create spinbox parameters
+        for attr_name, label, converter, row, col_label, col_widget, from_val, to_val, width in (
+                spinbox_params):
+            setattr(self, attr_name.replace("_var", "_var"), tk.StringVar(value=""))
+            self._create_spinbox_field(params_frame, label, getattr(self, attr_name), from_val,
+                                       to_val, width, row, col_label, col_widget)
 
-        ttk.Label(params_frame, text="Prompt 2:").grid(row=1, column=0, sticky="nw", padx=(0, 8))
-        self.prompt_2_var = tk.StringVar(value="")
-        self.prompt_2_text = tk.Text(params_frame, height=2, width=40, wrap="word")
-        self.prompt_2_text.grid(row=1, column=1, sticky="ew", padx=(0, 8))
-
-        ttk.Label(params_frame, text="Negative Prompt 2:").grid(row=1, column=2, sticky="nw",
-            padx=(0, 8))
-        self.negative_prompt_2_var = tk.StringVar(value="")
-        self.negative_prompt_2_text = tk.Text(params_frame, height=2, width=40, wrap="word")
-        self.negative_prompt_2_text.grid(row=1, column=3, sticky="ew", padx=(0, 8))
-
-        ttk.Label(params_frame, text="Height:").grid(row=1, column=4, sticky="e")
-        self.height_var = tk.StringVar(value="")
-        self.height_spin = ttk.Spinbox(params_frame, from_=0, to=2048, textvariable=self.height_var,
-            width=8)
-        self.height_spin.grid(row=1, column=5, sticky="w", padx=(8, 8))
-
-        ttk.Label(params_frame, text="Prompt 3:").grid(row=2, column=0, sticky="nw", padx=(0, 8))
-        self.prompt_3_var = tk.StringVar(value="")
-        self.prompt_3_text = tk.Text(params_frame, height=2, width=40, wrap="word")
-        self.prompt_3_text.grid(row=2, column=1, sticky="ew", padx=(0, 8))
-
-        ttk.Label(params_frame, text="Negative Prompt 3:").grid(row=2, column=2, sticky="nw",
-            padx=(0, 8))
-        self.negative_prompt_3_var = tk.StringVar(value="")
-        self.negative_prompt_3_text = tk.Text(params_frame, height=2, width=40, wrap="word")
-        self.negative_prompt_3_text.grid(row=2, column=3, sticky="ew", padx=(0, 8))
-
-        ttk.Label(params_frame, text="Width:").grid(row=2, column=4, sticky="e")
-        self.width_var = tk.StringVar(value="")
-        self.width_spin = ttk.Spinbox(params_frame, from_=0, to=2048, textvariable=self.width_var,
-            width=8)
-        self.width_spin.grid(row=2, column=5, sticky="w", padx=(8, 8))
-
-        ttk.Label(params_frame, text="Images per Prompt:").grid(row=3, column=0, sticky="w")
-        self.num_images_var = tk.StringVar(value="")
-        self.num_images_spin = ttk.Spinbox(params_frame, from_=0, to=10,
-            textvariable=self.num_images_var, width=8)
-        self.num_images_spin.grid(row=3, column=1, sticky="w", padx=(8, 8))
-
-        ttk.Label(params_frame, text="Seed (0 = random):").grid(row=3, column=2, sticky="e")
-        self.seed_var = tk.StringVar(value="")
-        self.seed_spin = ttk.Spinbox(params_frame, from_=0, to=2147483647,
-            textvariable=self.seed_var, width=12)
-        self.seed_spin.grid(row=3, column=3, sticky="w", padx=(8, 8))
-
-        ttk.Label(params_frame, text="Strength (0-1):").grid(row=3, column=4, sticky="e")
-        self.strength_var = tk.StringVar(value="")
-        self.strength_spin = ttk.Spinbox(params_frame, from_=0.0, to=1.0,
-            textvariable=self.strength_var, width=8)
-        self.strength_spin.grid(row=3, column=5, sticky="w", padx=(8, 8))
-
-        ttk.Label(params_frame, text="Max Sequence Length:").grid(row=4, column=0, sticky="w")
-        self.max_seq_length_var = tk.StringVar(value="")
-        self.max_seq_length_spin = ttk.Spinbox(params_frame, from_=0, to=512,
-            textvariable=self.max_seq_length_var, width=12, )
-        self.max_seq_length_spin.grid(row=4, column=1, sticky="w", padx=(8, 8))
+        # Create text parameters
+        for attr_name, label, row, col_label, col_widget in text_params:
+            text_widget = self._create_text_field(params_frame, label, 2, 40, row, col_label,
+                                                  col_widget)
+            setattr(self, attr_name, text_widget)
 
         params_frame.columnconfigure(1, weight=1)
         params_frame.columnconfigure(3, weight=1)
@@ -247,6 +261,47 @@ class DiffusionUI(tk.Tk):
         self.bind("<Control-Return>", lambda
             _event: self._start_generation())
 
+    def _collect_optional_parameters(
+            self
+            ) -> dict:
+        """Collect optional parameters from UI and return as kwargs dict."""
+        kwargs = {}
+
+        # Helper to add numeric parameter
+        def add_if_set(
+                var,
+                key: str,
+                converter
+                ) -> None:
+            value = var.get().strip() if hasattr(var, 'get') else ""
+            if value:
+                kwargs[key] = converter(value)
+
+        # Helper to add text parameter
+        def add_text_if_set(
+                widget,
+                key: str
+                ) -> None:
+            value = widget.get("1.0", "end-1c").strip()
+            if value:
+                kwargs[key] = value
+
+        add_if_set(self.steps_var, "num_inference_steps", int)
+        add_text_if_set(self.negative_prompt_text, "negative_prompt")
+        add_if_set(self.guidance_scale_var, "guidance_scale", float)
+        add_text_if_set(self.prompt_2_text, "prompt_2")
+        add_text_if_set(self.negative_prompt_2_text, "negative_prompt_2")
+        add_text_if_set(self.prompt_3_text, "prompt_3")
+        add_text_if_set(self.negative_prompt_3_text, "negative_prompt_3")
+        add_if_set(self.height_var, "height", int)
+        add_if_set(self.width_var, "width", int)
+        add_if_set(self.num_images_var, "num_images_per_prompt", int)
+        add_if_set(self.seed_var, "rng_seed", int)
+        add_if_set(self.strength_var, "strength", float)
+        add_if_set(self.max_seq_length_var, "max_sequence_length", int)
+
+        return kwargs
+
     def _start_generation(
             self
             ) -> None:
@@ -264,46 +319,8 @@ class DiffusionUI(tk.Tk):
         if self.generator.device != selected_device or self.generator.model_id != selected_model:
             self.generator = ImageGenerator(model_id=selected_model, device=selected_device)
 
-        # Collect optional parameters - only include if explicitly set by user
-        kwargs = {}
-        if self.steps_var.get().strip():
-            kwargs["num_inference_steps"] = int(self.steps_var.get())
-
-        negative_prompt = self.negative_prompt_text.get("1.0", "end-1c").strip()
-        if negative_prompt:
-            kwargs["negative_prompt"] = negative_prompt
-
-        if self.guidance_scale_var.get().strip():
-            kwargs["guidance_scale"] = float(self.guidance_scale_var.get())
-
-        prompt_2 = self.prompt_2_text.get("1.0", "end-1c").strip()
-        if prompt_2:
-            kwargs["prompt_2"] = prompt_2
-
-        prompt_3 = self.prompt_3_text.get("1.0", "end-1c").strip()
-        if prompt_3:
-            kwargs["prompt_3"] = prompt_3
-
-        negative_prompt_2 = self.negative_prompt_2_text.get("1.0", "end-1c").strip()
-        if negative_prompt_2:
-            kwargs["negative_prompt_2"] = negative_prompt_2
-
-        negative_prompt_3 = self.negative_prompt_3_text.get("1.0", "end-1c").strip()
-        if negative_prompt_3:
-            kwargs["negative_prompt_3"] = negative_prompt_3
-
-        if self.height_var.get().strip():
-            kwargs["height"] = int(self.height_var.get())
-        if self.width_var.get().strip():
-            kwargs["width"] = int(self.width_var.get())
-        if self.num_images_var.get().strip():
-            kwargs["num_images_per_prompt"] = int(self.num_images_var.get())
-        if self.seed_var.get().strip():
-            kwargs["rng_seed"] = int(self.seed_var.get())
-        if self.strength_var.get().strip():
-            kwargs["strength"] = float(self.strength_var.get())
-        if self.max_seq_length_var.get().strip():
-            kwargs["max_sequence_length"] = int(self.max_seq_length_var.get())
+        # Collect optional parameters
+        kwargs = self._collect_optional_parameters()
 
         # Run model loading/inference off the UI thread to keep the window responsive.
         worker = threading.Thread(target=self._generate_in_background, args=(prompt,),
@@ -365,6 +382,9 @@ class DiffusionUI(tk.Tk):
             cols = cols_plus_1
             rows = rows_if_plus_1
 
+        # Store PhotoImage references to prevent garbage collection
+        self.preview_photos = []
+
         # Create a grid of image labels
         for idx, img in enumerate(images):
             row = idx // cols
@@ -372,6 +392,7 @@ class DiffusionUI(tk.Tk):
 
             # Convert PIL image to PhotoImage
             photo = ImageTk.PhotoImage(img)
+            self.preview_photos.append(photo)
 
             # Create label with the image
             label = ttk.Label(self.preview_frame, image=photo)
