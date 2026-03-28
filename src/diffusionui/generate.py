@@ -61,6 +61,7 @@ class ImageGenerator:
             self,
             prompt: str,
             status_callback: Callable[[str], None],
+            progress_callback: Callable[[int, int], None] | None = None,
             **kwargs
     ) -> list[Image.Image]:
         self._ensure_pipeline(status_callback=status_callback)
@@ -68,10 +69,11 @@ class ImageGenerator:
         status_callback("Generating image…")
         # Build generation parameters - use default steps if not provided
         gen_params = kwargs.copy()
-        image_tensor = self.pipeline.generate(prompt, **gen_params, callback=lambda
-            step,
-            num_steps,
-            latent: status_callback(f"Step {step + 1}/{num_steps}"), )
+
+        # Create a callback that updates progress
+        gen_params["callback"] = lambda step, num_steps, latent: progress_callback(step, num_steps)
+
+        image_tensor = self.pipeline.generate(prompt, **gen_params)
         print("Generation done")
         status_callback("")
 
@@ -228,6 +230,12 @@ class DiffusionUI(tk.Tk):
         self.status_var = tk.StringVar(value="Ready")
         ttk.Label(root, textvariable=self.status_var).pack(anchor="w", pady=(10, 8))
 
+        # Progress bar
+        self.progress_var = tk.DoubleVar(value=0)
+        self.progress_bar = ttk.Progressbar(root, variable=self.progress_var, maximum=100,
+                                             mode="determinate")
+        self.progress_bar.pack(fill="x", pady=(0, 8))
+
         self.preview_frame = ttk.LabelFrame(root, text="Images", padding=8)
         self.preview_frame.pack(fill="both", expand=True)
 
@@ -246,6 +254,7 @@ class DiffusionUI(tk.Tk):
             return
 
         self.generate_button.config(state=tk.DISABLED)
+        self.progress_var.set(0)
 
         # Check if device or model has changed and recreate generator if needed
         selected_device = self.device_var.get()
@@ -306,7 +315,9 @@ class DiffusionUI(tk.Tk):
             ) -> None:
         try:
             images = self.generator.generate_image(prompt,
-                status_callback=self._set_status_from_worker, **kwargs)
+                                                   status_callback=self._set_status_from_worker,
+                                                   progress_callback=self._update_progress_from_worker,
+                                                   **kwargs)
             self.after(0, self._on_generation_success, images)
         except Exception as error:  # noqa: BLE001 - surface any generation failure in the UI
             self.after(0, self._on_generation_error, error)
@@ -316,6 +327,15 @@ class DiffusionUI(tk.Tk):
             text: str
             ) -> None:
         self.after(0, self.status_var.set, text)
+
+    def _update_progress_from_worker(
+            self,
+            step: int,
+            num_steps: int
+            ) -> None:
+        # Convert step/num_steps to percentage
+        percentage = (step / num_steps) * 100 if num_steps > 0 else 0
+        self.after(0, self.progress_var.set, percentage)
 
     def _on_generation_success(
             self,
@@ -357,6 +377,7 @@ class DiffusionUI(tk.Tk):
         for i in range(cols):
             self.preview_frame.grid_columnconfigure(i, weight=1)
 
+        self.progress_var.set(0)
         self.status_var.set("Done")
         self.generate_button.config(state=tk.NORMAL)
 
