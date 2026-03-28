@@ -1,3 +1,4 @@
+import gc
 import logging
 import threading
 import tkinter as tk
@@ -54,6 +55,7 @@ class ImageGenerator:
         status_callback("Downloading model…")
         model_path = hf_hub.snapshot_download(self.model_id)
         status_callback("Loading pipeline…")
+        gc.collect()
         self.pipeline = ov_genai.Text2ImagePipeline(model_path, self.device)
         status_callback("")
 
@@ -334,6 +336,7 @@ class DiffusionUI(tk.Tk):
             num_steps: int
             ) -> None:
         # Convert step/num_steps to percentage
+        gc.collect()
         percentage = (step / num_steps) * 100 if num_steps > 0 else 0
         self.after(0, self.progress_var.set, percentage)
 
@@ -362,9 +365,6 @@ class DiffusionUI(tk.Tk):
             cols = cols_plus_1
             rows = rows_if_plus_1
 
-        # Store PhotoImage references to prevent garbage collection
-        self.preview_photos = []
-
         # Create a grid of image labels
         for idx, img in enumerate(images):
             row = idx // cols
@@ -372,7 +372,6 @@ class DiffusionUI(tk.Tk):
 
             # Convert PIL image to PhotoImage
             photo = ImageTk.PhotoImage(img)
-            self.preview_photos.append(photo)
 
             # Create label with the image
             label = ttk.Label(self.preview_frame, image=photo)
