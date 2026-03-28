@@ -350,10 +350,17 @@ class DiffusionUI(tk.Tk):
         for widget in self.preview_frame.winfo_children():
             widget.destroy()
 
-        # Calculate grid layout (prefer square-ish grids)
+        # Calculate grid layout (prefer wider layouts)
         num_images = len(images)
         cols = int(num_images ** 0.5)
         rows = (num_images + cols - 1) // cols
+
+        # Try incrementing columns to see if we can reduce rows (prefer wider)
+        cols_plus_1 = cols + 1
+        rows_if_plus_1 = (num_images + cols_plus_1 - 1) // cols_plus_1
+        if rows_if_plus_1 < rows:
+            cols = cols_plus_1
+            rows = rows_if_plus_1
 
         # Store PhotoImage references to prevent garbage collection
         self.preview_photos = []
