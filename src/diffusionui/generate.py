@@ -17,7 +17,7 @@ def get_available_models() -> list[str]:
     """Fetch available models from the OpenVINO/image-generation collection."""
     try:
         collection = hf_hub.get_collection(COLLECTION_ID)
-        models = [item.item_id for item in collection.items if hasattr(item, 'item_id')]
+        models = [item.item_id for item in collection.items if hasattr(item, "item_id")]
         # Strip OpenVINO/ prefix for display
         stripped_models = [m.replace("OpenVINO/", "") for m in models]
         return sorted(stripped_models) if stripped_models else [MODEL_ID.replace("OpenVINO/", "")]
@@ -68,7 +68,10 @@ class ImageGenerator:
         status_callback("Generating image…")
         # Build generation parameters - use default steps if not provided
         gen_params = kwargs.copy()
-        image_tensor = self.pipeline.generate(prompt, **gen_params)
+        image_tensor = self.pipeline.generate(prompt, **gen_params, callback=lambda
+            step,
+            num_steps,
+            latent: status_callback(f"Step {step + 1}/{num_steps}"), )
         print("Generation done")
         status_callback("")
 
@@ -113,7 +116,7 @@ class DiffusionUI(tk.Tk):
         ttk.Label(device_frame, text="Device:").pack(side="left", padx=(0, 8))
         self.device_var = tk.StringVar(value="CPU")
         self.device_combo = ttk.Combobox(device_frame, textvariable=self.device_var,
-                                         values=["CPU", "GPU"], state="readonly", width=8)
+            values=["CPU", "GPU"], state="readonly", width=8, )
         self.device_combo.pack(side="left")
 
         model_frame = ttk.Frame(controls)
@@ -122,7 +125,7 @@ class DiffusionUI(tk.Tk):
         ttk.Label(model_frame, text="Model:").pack(side="left", padx=(0, 8))
         self.model_var = tk.StringVar(value=MODEL_ID.replace("OpenVINO/", ""))
         self.model_combo = ttk.Combobox(model_frame, textvariable=self.model_var,
-                                        values=self.available_models, state="readonly", width=28)
+            values=self.available_models, state="readonly", width=28, )
         self.model_combo.pack(side="left")
 
         self.generate_button = ttk.Button(controls, text="Generate", command=self._start_generation)
@@ -137,11 +140,11 @@ class DiffusionUI(tk.Tk):
         ttk.Label(params_frame, text="Steps:").grid(row=0, column=0, sticky="w")
         self.steps_var = tk.StringVar(value="")
         self.steps_spin = ttk.Spinbox(params_frame, from_=0, to=100, textvariable=self.steps_var,
-                                      width=8)
+            width=8)
         self.steps_spin.grid(row=0, column=1, sticky="w", padx=(8, 8))
 
         ttk.Label(params_frame, text="Negative Prompt:").grid(row=0, column=2, sticky="nw",
-                                                              padx=(0, 8))
+            padx=(0, 8))
         self.negative_prompt_var = tk.StringVar(value="")
         self.negative_prompt_text = tk.Text(params_frame, height=2, width=40, wrap="word")
         self.negative_prompt_text.grid(row=0, column=3, sticky="ew", padx=(0, 8))
@@ -149,7 +152,7 @@ class DiffusionUI(tk.Tk):
         ttk.Label(params_frame, text="Guidance Scale:").grid(row=0, column=4, sticky="e")
         self.guidance_scale_var = tk.StringVar(value="")
         self.guidance_scale_spin = ttk.Spinbox(params_frame, from_=0.0, to=20.0,
-                                               textvariable=self.guidance_scale_var, width=8)
+            textvariable=self.guidance_scale_var, width=8, )
         self.guidance_scale_spin.grid(row=0, column=5, sticky="w", padx=(8, 8))
 
         ttk.Label(params_frame, text="Prompt 2:").grid(row=1, column=0, sticky="nw", padx=(0, 8))
@@ -158,7 +161,7 @@ class DiffusionUI(tk.Tk):
         self.prompt_2_text.grid(row=1, column=1, sticky="ew", padx=(0, 8))
 
         ttk.Label(params_frame, text="Negative Prompt 2:").grid(row=1, column=2, sticky="nw",
-                                                                padx=(0, 8))
+            padx=(0, 8))
         self.negative_prompt_2_var = tk.StringVar(value="")
         self.negative_prompt_2_text = tk.Text(params_frame, height=2, width=40, wrap="word")
         self.negative_prompt_2_text.grid(row=1, column=3, sticky="ew", padx=(0, 8))
@@ -166,7 +169,7 @@ class DiffusionUI(tk.Tk):
         ttk.Label(params_frame, text="Height:").grid(row=1, column=4, sticky="e")
         self.height_var = tk.StringVar(value="")
         self.height_spin = ttk.Spinbox(params_frame, from_=0, to=2048, textvariable=self.height_var,
-                                       width=8)
+            width=8)
         self.height_spin.grid(row=1, column=5, sticky="w", padx=(8, 8))
 
         ttk.Label(params_frame, text="Prompt 3:").grid(row=2, column=0, sticky="nw", padx=(0, 8))
@@ -175,7 +178,7 @@ class DiffusionUI(tk.Tk):
         self.prompt_3_text.grid(row=2, column=1, sticky="ew", padx=(0, 8))
 
         ttk.Label(params_frame, text="Negative Prompt 3:").grid(row=2, column=2, sticky="nw",
-                                                                padx=(0, 8))
+            padx=(0, 8))
         self.negative_prompt_3_var = tk.StringVar(value="")
         self.negative_prompt_3_text = tk.Text(params_frame, height=2, width=40, wrap="word")
         self.negative_prompt_3_text.grid(row=2, column=3, sticky="ew", padx=(0, 8))
@@ -183,31 +186,31 @@ class DiffusionUI(tk.Tk):
         ttk.Label(params_frame, text="Width:").grid(row=2, column=4, sticky="e")
         self.width_var = tk.StringVar(value="")
         self.width_spin = ttk.Spinbox(params_frame, from_=0, to=2048, textvariable=self.width_var,
-                                      width=8)
+            width=8)
         self.width_spin.grid(row=2, column=5, sticky="w", padx=(8, 8))
 
         ttk.Label(params_frame, text="Images per Prompt:").grid(row=3, column=0, sticky="w")
         self.num_images_var = tk.StringVar(value="")
         self.num_images_spin = ttk.Spinbox(params_frame, from_=0, to=10,
-                                           textvariable=self.num_images_var, width=8)
+            textvariable=self.num_images_var, width=8)
         self.num_images_spin.grid(row=3, column=1, sticky="w", padx=(8, 8))
 
         ttk.Label(params_frame, text="Seed (0 = random):").grid(row=3, column=2, sticky="e")
         self.seed_var = tk.StringVar(value="")
         self.seed_spin = ttk.Spinbox(params_frame, from_=0, to=2147483647,
-                                     textvariable=self.seed_var, width=12)
+            textvariable=self.seed_var, width=12)
         self.seed_spin.grid(row=3, column=3, sticky="w", padx=(8, 8))
 
         ttk.Label(params_frame, text="Strength (0-1):").grid(row=3, column=4, sticky="e")
         self.strength_var = tk.StringVar(value="")
         self.strength_spin = ttk.Spinbox(params_frame, from_=0.0, to=1.0,
-                                         textvariable=self.strength_var, width=8)
+            textvariable=self.strength_var, width=8)
         self.strength_spin.grid(row=3, column=5, sticky="w", padx=(8, 8))
 
         ttk.Label(params_frame, text="Max Sequence Length:").grid(row=4, column=0, sticky="w")
         self.max_seq_length_var = tk.StringVar(value="")
         self.max_seq_length_spin = ttk.Spinbox(params_frame, from_=0, to=512,
-                                               textvariable=self.max_seq_length_var, width=12)
+            textvariable=self.max_seq_length_var, width=12, )
         self.max_seq_length_spin.grid(row=4, column=1, sticky="w", padx=(8, 8))
 
         params_frame.columnconfigure(1, weight=1)
@@ -258,7 +261,7 @@ class DiffusionUI(tk.Tk):
         negative_prompt = self.negative_prompt_text.get("1.0", "end-1c").strip()
         if negative_prompt:
             kwargs["negative_prompt"] = negative_prompt
-        
+
         if self.guidance_scale_var.get().strip():
             kwargs["guidance_scale"] = float(self.guidance_scale_var.get())
 
@@ -277,7 +280,7 @@ class DiffusionUI(tk.Tk):
         negative_prompt_3 = self.negative_prompt_3_text.get("1.0", "end-1c").strip()
         if negative_prompt_3:
             kwargs["negative_prompt_3"] = negative_prompt_3
-        
+
         if self.height_var.get().strip():
             kwargs["height"] = int(self.height_var.get())
         if self.width_var.get().strip():
@@ -293,7 +296,7 @@ class DiffusionUI(tk.Tk):
 
         # Run model loading/inference off the UI thread to keep the window responsive.
         worker = threading.Thread(target=self._generate_in_background, args=(prompt,),
-                                  kwargs=kwargs, daemon=True, )
+            kwargs=kwargs, daemon=True, )
         worker.start()
 
     def _generate_in_background(
@@ -303,8 +306,7 @@ class DiffusionUI(tk.Tk):
             ) -> None:
         try:
             images = self.generator.generate_image(prompt,
-                                                   status_callback=self._set_status_from_worker,
-                                                   **kwargs)
+                status_callback=self._set_status_from_worker, **kwargs)
             self.after(0, self._on_generation_success, images)
         except Exception as error:  # noqa: BLE001 - surface any generation failure in the UI
             self.after(0, self._on_generation_error, error)
