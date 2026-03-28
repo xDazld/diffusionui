@@ -141,7 +141,7 @@ class DiffusionUI(tk.Tk):
 
         ttk.Label(params_frame, text="Steps:").grid(row=0, column=0, sticky="w")
         self.steps_var = tk.StringVar(value="")
-        self.steps_spin = ttk.Spinbox(params_frame, from_=0, to=100, textvariable=self.steps_var,
+        self.steps_spin = ttk.Spinbox(params_frame, from_=1, to=100, textvariable=self.steps_var,
             width=8)
         self.steps_spin.grid(row=0, column=1, sticky="w", padx=(8, 8))
 
