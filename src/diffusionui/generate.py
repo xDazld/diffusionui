@@ -10,7 +10,7 @@ import openvino_genai as ov_genai
 from PIL import Image, ImageTk
 
 MODEL_ID = "OpenVINO/stable-diffusion-v1-5-int8-ov"
-DEVICE = "CPU"
+DEVICE = "GPU"
 COLLECTION_ID = "OpenVINO/image-generation"
 
 
@@ -178,7 +178,7 @@ class DiffusionUI(tk.Tk):
         device_frame.grid(row=0, column=2, sticky="n", padx=(0, 8))
 
         ttk.Label(device_frame, text="Device:").pack(side="left", padx=(0, 8))
-        self.device_var = tk.StringVar(value="CPU")
+        self.device_var = tk.StringVar(value="GPU")
         self.device_combo = ttk.Combobox(device_frame, textvariable=self.device_var,
             values=["CPU", "GPU"], state="readonly", width=8, )
         self.device_combo.pack(side="left")
