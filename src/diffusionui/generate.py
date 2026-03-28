@@ -1,3 +1,4 @@
+import logging
 import threading
 import tkinter as tk
 from collections.abc import Callable
@@ -9,6 +10,29 @@ from PIL import Image, ImageTk
 
 MODEL_ID = "OpenVINO/stable-diffusion-v1-5-int8-ov"
 DEVICE = "CPU"
+COLLECTION_ID = "OpenVINO/image-generation"
+
+
+def get_available_models() -> list[str]:
+    """Fetch available models from the OpenVINO/image-generation collection."""
+    try:
+        collection = hf_hub.get_collection(COLLECTION_ID)
+        models = [item.item_id for item in collection.items if hasattr(item, 'item_id')]
+        # Strip OpenVINO/ prefix for display
+        stripped_models = [m.replace("OpenVINO/", "") for m in models]
+        return sorted(stripped_models) if stripped_models else [MODEL_ID.replace("OpenVINO/", "")]
+    except hf_hub.HfHubHTTPError as e:
+        logging.warning(f"Failed to fetch models from HuggingFace: {e}")
+        return [MODEL_ID.replace("OpenVINO/", "")]
+
+
+def get_full_model_id(
+        model_name: str
+        ) -> str:
+    """Convert display model name to full model ID with OpenVINO/ prefix."""
+    if model_name.startswith("OpenVINO/"):
+        return model_name
+    return f"OpenVINO/{model_name}"
 
 
 class ImageGenerator:
@@ -58,6 +82,7 @@ class DiffusionUI(tk.Tk):
         self.title("Diffusion UI")
         self.geometry("900x900")
 
+        self.available_models = get_available_models()
         self.generator = ImageGenerator()
         self.preview_photo: ImageTk.PhotoImage | None = None
 
@@ -79,8 +104,20 @@ class DiffusionUI(tk.Tk):
         self.prompt_entry = ttk.Entry(controls, textvariable=self.prompt_var)
         self.prompt_entry.grid(row=0, column=1, sticky="ew", padx=(8, 8))
 
+        ttk.Label(controls, text="Device:").grid(row=0, column=2, sticky="e")
+        self.device_var = tk.StringVar(value="CPU")
+        self.device_combo = ttk.Combobox(controls, textvariable=self.device_var,
+                                         values=["CPU", "GPU"], state="readonly", width=6)
+        self.device_combo.grid(row=0, column=3, padx=(8, 8))
+
+        ttk.Label(controls, text="Model:").grid(row=0, column=4, sticky="e")
+        self.model_var = tk.StringVar(value=MODEL_ID.replace("OpenVINO/", ""))
+        self.model_combo = ttk.Combobox(controls, textvariable=self.model_var,
+                                        values=self.available_models, state="readonly", width=30)
+        self.model_combo.grid(row=0, column=5, sticky="ew", padx=(8, 8))
+
         self.generate_button = ttk.Button(controls, text="Generate", command=self._start_generation)
-        self.generate_button.grid(row=0, column=2, padx=(8, 0))
+        self.generate_button.grid(row=0, column=6, padx=(8, 0))
 
         controls.columnconfigure(1, weight=1)
 
@@ -190,6 +227,12 @@ class DiffusionUI(tk.Tk):
 
         self.generate_button.config(state=tk.DISABLED)
 
+        # Check if device or model has changed and recreate generator if needed
+        selected_device = self.device_var.get()
+        selected_model = get_full_model_id(self.model_var.get())
+        if self.generator.device != selected_device or self.generator.model_id != selected_model:
+            self.generator = ImageGenerator(model_id=selected_model, device=selected_device)
+
         # Collect optional parameters - only include if explicitly set by user
         kwargs = {}
         if self.steps_var.get().strip():
@@ -260,6 +303,7 @@ class DiffusionUI(tk.Tk):
         self.status_var.set("Generation failed")
         self.generate_button.config(state=tk.NORMAL)
         messagebox.showerror("Generation failed", str(error))
+        logging.exception(error)
 
 
 def main() -> None:
