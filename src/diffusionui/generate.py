@@ -382,6 +382,15 @@ class DiffusionUI(tk.Tk):
             cols = cols_plus_1
             rows = rows_if_plus_1
 
+        # Update the preview frame to get available space
+        self.preview_frame.update_idletasks()
+        available_width = self.preview_frame.winfo_width() - 40  # Account for padding
+        available_height = self.preview_frame.winfo_height() - 40
+
+        # Calculate size for each image in the grid
+        max_img_width = max(available_width // cols, 100)  # Minimum 100px
+        max_img_height = max(available_height // rows, 100)  # Minimum 100px
+
         # Store PhotoImage references to prevent garbage collection
         self.preview_photos = []
 
@@ -390,8 +399,12 @@ class DiffusionUI(tk.Tk):
             row = idx // cols
             col = idx % cols
 
+            # Resize image to fit available space while maintaining aspect ratio
+            img_copy = img.copy()
+            img_copy.thumbnail((max_img_width, max_img_height), Image.Resampling.LANCZOS)
+
             # Convert PIL image to PhotoImage
-            photo = ImageTk.PhotoImage(img)
+            photo = ImageTk.PhotoImage(img_copy)
             self.preview_photos.append(photo)
 
             # Create label with the image
