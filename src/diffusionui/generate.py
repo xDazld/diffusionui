@@ -420,6 +420,7 @@ class DiffusionUI(tk.Tk):
         self.progress_var.set(0)
         self.status_var.set("Done")
         self.generate_button.config(state=tk.NORMAL)
+        self.preview_frame.bell()
 
     def _on_generation_error(
             self,
