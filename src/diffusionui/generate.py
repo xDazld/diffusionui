@@ -63,7 +63,7 @@ class ImageGenerator:
             self,
             prompt: str,
             status_callback: Callable[[str], None],
-            progress_callback: Callable[[int, int], None] | None = None,
+            progress_callback: Callable[[int, int, list[Image.Image]], None] | None = None,
             **kwargs
     ) -> list[Image.Image]:
         self._ensure_pipeline(status_callback=status_callback)
@@ -73,7 +73,9 @@ class ImageGenerator:
         gen_params = kwargs.copy()
 
         # Create a callback that updates progress
-        gen_params["callback"] = lambda step, num_steps, latent: progress_callback(step, num_steps)
+        gen_params["callback"] = lambda step, num_steps, latent: progress_callback(
+            step, num_steps, [Image.fromarray(img) for img in self.pipeline.decode(latent).data]
+        )
 
         image_tensor = self.pipeline.generate(prompt, **gen_params)
         print("Generation done")
@@ -350,20 +352,20 @@ class DiffusionUI(tk.Tk):
     def _update_progress_from_worker(
             self,
             step: int,
-            num_steps: int
+            num_steps: int,
+            latent: list[Image.Image]
             ) -> None:
         # Convert step/num_steps to percentage
         gc.collect()
         percentage = (step / num_steps) * 100 if num_steps > 0 else 0
         self.after(0, self.progress_var.set, percentage)
+        self.after(0, self._render_preview_images, latent)
 
-    def _on_generation_success(
+    def _render_preview_images(
             self,
             images: list[Image.Image]
             ) -> None:
         if not images:
-            self.status_var.set("No images generated")
-            self.generate_button.config(state=tk.NORMAL)
             return
 
         # Clear existing preview content
@@ -372,7 +374,7 @@ class DiffusionUI(tk.Tk):
 
         # Calculate grid layout (prefer wider layouts)
         num_images = len(images)
-        cols = int(num_images ** 0.5)
+        cols = max(1, int(num_images ** 0.5))
         rows = (num_images + cols - 1) // cols
 
         # Try incrementing columns to see if we can reduce rows (prefer wider)
@@ -416,6 +418,17 @@ class DiffusionUI(tk.Tk):
             self.preview_frame.grid_rowconfigure(i, weight=1)
         for i in range(cols):
             self.preview_frame.grid_columnconfigure(i, weight=1)
+
+    def _on_generation_success(
+            self,
+            images: list[Image.Image]
+            ) -> None:
+        if not images:
+            self.status_var.set("No images generated")
+            self.generate_button.config(state=tk.NORMAL)
+            return
+
+        self._render_preview_images(images)
 
         self.progress_var.set(0)
         self.status_var.set("Done")
