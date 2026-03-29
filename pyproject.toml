@@ -18,7 +18,7 @@ dependencies = [
     "peft>=0.18.1",
     "psutil>=7.2.2",
     "pydantic>=2.12.5",
-    "requests>=2.33.0",
+    "requests>=2.28.1",
     "scikit-image>=0.26.0",
     "scipy>=1.17.1",
     "sentencepiece>=0.2.1",
@@ -35,3 +35,9 @@ extend-select = ["UP", "SIM", "PERF", "BLE"]
 dev = [
     "pytest-bdd>=8.1.0",
 ]
+
+[[tool.uv.index]]
+# Optional name for the index.
+name = "pytorch"
+# Required URL for the index.
+url = "https://download.pytorch.org/whl/xpu"
