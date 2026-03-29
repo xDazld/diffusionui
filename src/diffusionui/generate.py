@@ -205,7 +205,7 @@ class DiffusionUI(tk.Tk):
 
         # Define parameters with their properties: (attr_name, label, type, row, col_label,
         # col_widget, from, to, width, height)
-        spinbox_params = [("steps_var", "Steps:", int, 0, 0, 1, 1, 100, 8),
+        spinbox_params = [("steps_var", "Inference Steps:", int, 0, 0, 1, 1, 100, 8),
             ("guidance_scale_var", "Guidance Scale:", float, 0, 4, 5, 0.0, 20.0, 8),
             ("height_var", "Height:", int, 1, 4, 5, 0, 2048, 8),
             ("width_var", "Width:", int, 2, 4, 5, 0, 2048, 8),
