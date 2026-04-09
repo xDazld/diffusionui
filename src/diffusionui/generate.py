@@ -11,7 +11,7 @@ import numpy as np
 import openvino as ov
 import openvino_genai as ov_genai
 import PIL.Image
-from PIL import Image, ImageTk
+from PIL import Image, ImageGrab, ImageTk
 
 MODEL_ID = "OpenVINO/stable-diffusion-v1-5-int8-ov"
 DEVICE = "GPU"
@@ -57,8 +57,8 @@ class ImageGenerator:
         self._pipeline_mode: str | None = None
 
     @staticmethod
-    def _load_image_tensor(path: str) -> ov.Tensor:
-        picture = Image.open(path).convert("RGB")
+    def _load_image_tensor(image: Image.Image) -> ov.Tensor:
+        picture = image.convert("RGB")
         image_data = np.array(picture)[None]
         return ov.Tensor(image_data)
 
@@ -87,8 +87,8 @@ class ImageGenerator:
         status_callback: Callable[[str], None],
         progress_callback: Callable[[int, int, list[Image.Image]], None] | None = None,
         mode: str = "Text2Image",
-        input_image: ov.Tensor | None = None,
-        mask_image: ov.Tensor | None = None,
+        input_image: Image.Image | None = None,
+        mask_image: Image.Image | None = None,
         **kwargs,
     ) -> list[Image.Image]:
         self._ensure_pipeline(mode=mode, status_callback=status_callback)
@@ -100,14 +100,14 @@ class ImageGenerator:
             case "Image2Image":
                 if input_image is None:
                     raise ValueError("Image2Image mode requires a source image.")
-                gen_params["image"] = input_image
+                gen_params["image"] = self._load_image_tensor(input_image)
             case "Inpainting":
                 if input_image is None:
                     raise ValueError("Inpainting mode requires a source image.")
                 if mask_image is None:
                     raise ValueError("Inpainting mode requires a mask image.")
-                gen_params["image"] = input_image
-                gen_params["mask_image"] = mask_image
+                gen_params["image"] = self._load_image_tensor(input_image)
+                gen_params["mask_image"] = self._load_image_tensor(mask_image)
 
         if progress_callback is not None:
             gen_params["callback"] = lambda step, num_steps, latent: progress_callback(
@@ -135,6 +135,10 @@ class DiffusionUI(tk.Tk):
         self.available_models = get_available_models()
         self.generator = ImageGenerator()
         self.preview_photo: ImageTk.PhotoImage | None = None
+        self.source_image: Image.Image | None = None
+        self.mask_image: Image.Image | None = None
+        self.source_image_photo: ImageTk.PhotoImage | None = None
+        self.mask_image_photo: ImageTk.PhotoImage | None = None
 
         # Initialize dynamically created attributes to None so IDE recognizes them
         self.steps_var: tk.StringVar = tk.StringVar(value="")
@@ -152,8 +156,6 @@ class DiffusionUI(tk.Tk):
         self.strength_var: tk.StringVar = tk.StringVar(value="")
         self.max_seq_length_var: tk.StringVar = tk.StringVar(value="")
         self.prompt_text: tk.Text = tk.Text(self)  # type: ignore
-        self.source_image_var: tk.StringVar = tk.StringVar(value="")
-        self.mask_image_var: tk.StringVar = tk.StringVar(value="")
         self.device_var: tk.StringVar = tk.StringVar(value="")
         self.device_combo: ttk.Combobox
         self.model_var: tk.StringVar = tk.StringVar(value="")
@@ -167,8 +169,10 @@ class DiffusionUI(tk.Tk):
         self.preview_photos: list[ImageTk.PhotoImage] = []
         self.image_frame: ttk.LabelFrame | None = None
         self.status_label: ttk.Label | None = None
-        self.source_image_row: tuple[tk.Widget, tk.Widget, tk.Widget] | None = None
-        self.mask_image_row: tuple[tk.Widget, tk.Widget, tk.Widget] | None = None
+        self.source_image_row: ttk.Frame | None = None
+        self.mask_image_row: ttk.Frame | None = None
+        self.source_image_preview_label: ttk.Label | None = None
+        self.mask_image_preview_label: ttk.Label | None = None
         self.strength_label: ttk.Label | None = None
         self.strength_spinbox: ttk.Spinbox | None = None
 
@@ -218,39 +222,112 @@ class DiffusionUI(tk.Tk):
         return [("Image files", patterns)]
 
     @staticmethod
-    def _create_path_row(
-        frame, label_text: str, var: tk.StringVar, row: int, browse_command
-    ) -> tuple[tk.Widget, tk.Widget, tk.Widget]:
-        label = ttk.Label(frame, text=label_text)
-        entry = ttk.Entry(frame, textvariable=var)
-        button = ttk.Button(frame, text="Browse…", command=browse_command)
-        label.grid(row=row, column=0, sticky="e", padx=(0, 8))
-        entry.grid(row=row, column=1, sticky="ew", padx=(0, 8))
-        button.grid(row=row, column=2, sticky="w")
-        return label, entry, button
+    def _create_image_row(
+        frame, label_text: str, row: int, browse_command, clipboard_command
+    ) -> tuple[ttk.Frame, ttk.Label]:
+        row_frame = ttk.Frame(frame)
+        row_frame.grid(row=row, column=0, columnspan=4, sticky="ew", pady=4)
+        row_frame.columnconfigure(1, weight=1)
 
-    def _browse_source_image(self) -> None:
+        label = ttk.Label(row_frame, text=label_text)
+        label.grid(row=0, column=0, sticky="e", padx=(0, 8))
+
+        preview = ttk.Label(row_frame, text="No image", anchor="center")
+        preview.grid(row=0, column=1, sticky="w", padx=(0, 8))
+
+        button = ttk.Button(row_frame, text="Browse…", command=browse_command)
+        button.grid(row=0, column=2, sticky="w", padx=(0, 8))
+
+        clipboard_button = ttk.Button(
+            row_frame, text="Clipboard", command=clipboard_command
+        )
+        clipboard_button.grid(row=0, column=3, sticky="w")
+
+        return row_frame, preview
+
+    def _load_image_from_path(self, path: str, label: str) -> Image.Image:
+        if not Path(path).is_file():
+            raise FileNotFoundError(f"{label} not found: {path}")
+        picture = Image.open(path).convert("RGB")
+        return picture
+
+    def _load_image_from_clipboard(self, label: str) -> Image.Image:
+        try:
+            clipboard = ImageGrab.grabclipboard()
+        except (NotImplementedError, OSError) as error:
+            raise ValueError(
+                f"Clipboard image loading is not available: {error}"
+            ) from error
+
+        if isinstance(clipboard, Image.Image):
+            return clipboard.convert("RGB")
+
+        if isinstance(clipboard, list):
+            for item in clipboard:
+                path = Path(item)
+                if path.is_file():
+                    try:
+                        return Image.open(path).convert("RGB")
+                    except OSError:
+                        continue
+
+        raise ValueError(f"Clipboard does not contain a usable {label.lower()} image.")
+
+    def _set_selected_image(self, slot: str, image: Image.Image) -> None:
+        setattr(self, f"{slot}_image", image)
+        preview_label = getattr(self, f"{slot}_image_preview_label")
+        thumbnail = image.copy()
+        thumbnail.thumbnail((72, 72), Image.Resampling.LANCZOS)
+        image_photo = ImageTk.PhotoImage(thumbnail)
+        setattr(self, f"{slot}_image_photo", image_photo)
+        preview_label.configure(image=image_photo, text="")
+
+    def _load_source_image_from_file(self) -> None:
         filename = filedialog.askopenfilename(
             title="Choose a source image",
             filetypes=self._image_dialog_filetypes(),
         )
         if filename:
-            self.source_image_var.set(filename)
+            try:
+                self._set_selected_image(
+                    "source", self._load_image_from_path(filename, "Source image")
+                )
+            except (FileNotFoundError, OSError) as error:
+                messagebox.showerror("Invalid image", str(error))
 
-    def _browse_mask_image(self) -> None:
+    def _load_mask_image_from_file(self) -> None:
         filename = filedialog.askopenfilename(
             title="Choose a mask image",
             filetypes=self._image_dialog_filetypes(),
         )
         if filename:
-            self.mask_image_var.set(filename)
+            try:
+                self._set_selected_image(
+                    "mask", self._load_image_from_path(filename, "Mask image")
+                )
+            except (FileNotFoundError, OSError) as error:
+                messagebox.showerror("Invalid image", str(error))
 
-    def _get_required_image_tensor(self, path: str, label: str) -> ov.Tensor:
-        if not path:
+    def _load_source_image_from_clipboard_button(self) -> None:
+        try:
+            self._set_selected_image(
+                "source", self._load_image_from_clipboard("Source image")
+            )
+        except ValueError as error:
+            messagebox.showerror("Clipboard image", str(error))
+
+    def _load_mask_image_from_clipboard_button(self) -> None:
+        try:
+            self._set_selected_image(
+                "mask", self._load_image_from_clipboard("Mask image")
+            )
+        except ValueError as error:
+            messagebox.showerror("Clipboard image", str(error))
+
+    def _require_image(self, image: Image.Image | None, label: str) -> Image.Image:
+        if image is None:
             raise ValueError(f"Please choose a {label.lower()}.")
-        if not Path(path).is_file():
-            raise FileNotFoundError(f"{label} not found: {path}")
-        return ImageGenerator._load_image_tensor(path)
+        return image
 
     def _build_layout(
             self
@@ -364,19 +441,19 @@ class DiffusionUI(tk.Tk):
 
         self.image_frame = ttk.LabelFrame(root, text="Input Images", padding=8)
         self.image_frame.pack(fill="x", pady=(0, 8))
-        self.source_image_row = self._create_path_row(
+        self.source_image_row, self.source_image_preview_label = self._create_image_row(
             self.image_frame,
             "Source Image:",
-            self.source_image_var,
             0,
-            self._browse_source_image,
+            self._load_source_image_from_file,
+            self._load_source_image_from_clipboard_button,
         )
-        self.mask_image_row = self._create_path_row(
+        self.mask_image_row, self.mask_image_preview_label = self._create_image_row(
             self.image_frame,
             "Mask Image:",
-            self.mask_image_var,
             1,
-            self._browse_mask_image,
+            self._load_mask_image_from_file,
+            self._load_mask_image_from_clipboard_button,
         )
         self.image_frame.columnconfigure(1, weight=1)
 
@@ -472,13 +549,9 @@ class DiffusionUI(tk.Tk):
             input_image = None
             mask_image = None
             if selected_mode in {"Image2Image", "Inpainting"}:
-                input_image = self._get_required_image_tensor(
-                    self.source_image_var.get(), "Source image"
-                )
+                input_image = self._require_image(self.source_image, "Source image")
             if selected_mode == "Inpainting":
-                mask_image = self._get_required_image_tensor(
-                    self.mask_image_var.get(), "Mask image"
-                )
+                mask_image = self._require_image(self.mask_image, "Mask image")
         except (ValueError, FileNotFoundError) as error:
             self.generate_button.config(state=tk.NORMAL)
             messagebox.showerror("Invalid input", str(error))
@@ -498,11 +571,15 @@ class DiffusionUI(tk.Tk):
         )
         worker.start()
 
-    def _hide_widgets(self, widgets: tuple[tk.Widget, ...]) -> None:
+    def _hide_widgets(self, widgets: tk.Widget | tuple[tk.Widget, ...]) -> None:
+        if isinstance(widgets, tk.Widget):
+            widgets = (widgets,)
         for widget in widgets:
             widget.grid_remove()
 
-    def _show_widgets(self, widgets: tuple[tk.Widget, ...]) -> None:
+    def _show_widgets(self, widgets: tk.Widget | tuple[tk.Widget, ...]) -> None:
+        if isinstance(widgets, tk.Widget):
+            widgets = (widgets,)
         for widget in widgets:
             widget.grid()
 
