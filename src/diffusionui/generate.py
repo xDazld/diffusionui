@@ -3,15 +3,20 @@ import logging
 import threading
 import tkinter as tk
 from collections.abc import Callable
-from tkinter import messagebox, ttk
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
 
 import huggingface_hub as hf_hub
+import numpy as np
+import openvino as ov
 import openvino_genai as ov_genai
+import PIL.Image
 from PIL import Image, ImageTk
 
 MODEL_ID = "OpenVINO/stable-diffusion-v1-5-int8-ov"
 DEVICE = "GPU"
 COLLECTION_ID = "OpenVINO/image-generation"
+GENERATION_MODES = ("Text2Image", "Image2Image", "Inpainting")
 
 
 def get_available_models() -> list[str]:
@@ -38,44 +43,78 @@ def get_full_model_id(
 
 class ImageGenerator:
     def __init__(
-            self,
-            model_id: str = MODEL_ID,
-            device: str = DEVICE
-            ) -> None:
+        self, model_id: str = MODEL_ID, device: str = DEVICE, mode: str = "Text2Image"
+    ) -> None:
         self.model_id = model_id
         self.device = device
-        self.pipeline: ov_genai.Text2ImagePipeline | None = None
+        self.mode = mode
+        self.pipeline: (
+            ov_genai.Text2ImagePipeline
+            | ov_genai.Image2ImagePipeline
+            | ov_genai.InpaintingPipeline
+            | None
+        ) = None
+        self._pipeline_mode: str | None = None
+
+    @staticmethod
+    def _load_image_tensor(path: str) -> ov.Tensor:
+        picture = Image.open(path).convert("RGB")
+        image_data = np.array(picture)[None]
+        return ov.Tensor(image_data)
 
     def _ensure_pipeline(
-            self,
-            status_callback: Callable[[str], None]
-            ) -> None:
-        if self.pipeline is not None:
+        self, mode: str, status_callback: Callable[[str], None]
+    ) -> None:
+        if self.pipeline is not None and self._pipeline_mode == mode:
             return
         status_callback("Downloading model…")
         model_path = hf_hub.snapshot_download(self.model_id)
         status_callback("Loading pipeline…")
         gc.collect()
-        self.pipeline = ov_genai.Text2ImagePipeline(model_path, self.device)
+        match mode:
+            case "Image2Image":
+                self.pipeline = ov_genai.Image2ImagePipeline(model_path, self.device)
+            case "Inpainting":
+                self.pipeline = ov_genai.InpaintingPipeline(model_path, self.device)
+            case "Text2Image":
+                self.pipeline = ov_genai.Text2ImagePipeline(model_path, self.device)
+        self._pipeline_mode = mode
         status_callback("")
 
     def generate_image(
-            self,
-            prompt: str,
-            status_callback: Callable[[str], None],
-            progress_callback: Callable[[int, int, list[Image.Image]], None] | None = None,
-            **kwargs
+        self,
+        prompt: str,
+        status_callback: Callable[[str], None],
+        progress_callback: Callable[[int, int, list[Image.Image]], None] | None = None,
+        mode: str = "Text2Image",
+        input_image: ov.Tensor | None = None,
+        mask_image: ov.Tensor | None = None,
+        **kwargs,
     ) -> list[Image.Image]:
-        self._ensure_pipeline(status_callback=status_callback)
+        self._ensure_pipeline(mode=mode, status_callback=status_callback)
         assert self.pipeline is not None
         status_callback("Generating image…")
-        # Build generation parameters - use default steps if not provided
         gen_params = kwargs.copy()
 
-        # Create a callback that updates progress
-        gen_params["callback"] = lambda step, num_steps, latent: progress_callback(
-            step, num_steps, [Image.fromarray(img) for img in self.pipeline.decode(latent).data]
-        )
+        match mode:
+            case "Image2Image":
+                if input_image is None:
+                    raise ValueError("Image2Image mode requires a source image.")
+                gen_params["image"] = input_image
+            case "Inpainting":
+                if input_image is None:
+                    raise ValueError("Inpainting mode requires a source image.")
+                if mask_image is None:
+                    raise ValueError("Inpainting mode requires a mask image.")
+                gen_params["image"] = input_image
+                gen_params["mask_image"] = mask_image
+
+        if progress_callback is not None:
+            gen_params["callback"] = lambda step, num_steps, latent: progress_callback(
+                step,
+                num_steps,
+                [Image.fromarray(img) for img in self.pipeline.decode(latent).data],
+            )
 
         image_tensor = self.pipeline.generate(prompt, **gen_params)
         print("Generation done")
@@ -99,6 +138,7 @@ class DiffusionUI(tk.Tk):
 
         # Initialize dynamically created attributes to None so IDE recognizes them
         self.steps_var: tk.StringVar = tk.StringVar(value="")
+        self.mode_var: tk.StringVar = tk.StringVar(value="Text2Image")
         self.negative_prompt_text: tk.Text = tk.Text(self)  # type: ignore
         self.guidance_scale_var: tk.StringVar = tk.StringVar(value="")
         self.prompt_2_text: tk.Text = tk.Text(self)  # type: ignore
@@ -112,16 +152,25 @@ class DiffusionUI(tk.Tk):
         self.strength_var: tk.StringVar = tk.StringVar(value="")
         self.max_seq_length_var: tk.StringVar = tk.StringVar(value="")
         self.prompt_text: tk.Text = tk.Text(self)  # type: ignore
+        self.source_image_var: tk.StringVar = tk.StringVar(value="")
+        self.mask_image_var: tk.StringVar = tk.StringVar(value="")
         self.device_var: tk.StringVar = tk.StringVar(value="")
         self.device_combo: ttk.Combobox
         self.model_var: tk.StringVar = tk.StringVar(value="")
         self.model_combo: ttk.Combobox
+        self.mode_combo: ttk.Combobox
         self.generate_button: ttk.Button
         self.status_var: tk.StringVar = tk.StringVar(value="")
         self.progress_var: tk.DoubleVar = tk.DoubleVar(value=0)
         self.progress_bar: ttk.Progressbar
         self.preview_frame: ttk.LabelFrame
         self.preview_photos: list[ImageTk.PhotoImage] = []
+        self.image_frame: ttk.LabelFrame | None = None
+        self.status_label: ttk.Label | None = None
+        self.source_image_row: tuple[tk.Widget, tk.Widget, tk.Widget] | None = None
+        self.mask_image_row: tuple[tk.Widget, tk.Widget, tk.Widget] | None = None
+        self.strength_label: ttk.Label | None = None
+        self.strength_spinbox: ttk.Spinbox | None = None
 
         self._build_layout()
 
@@ -159,6 +208,50 @@ class DiffusionUI(tk.Tk):
         text_widget.grid(row=row, column=col_widget, sticky="ew", padx=(0, 8))
         return text_widget
 
+    @staticmethod
+    def _normalize_mode(mode: str) -> str:
+        return mode if mode in GENERATION_MODES else "Text2Image"
+
+    @staticmethod
+    def _image_dialog_filetypes() -> list[tuple[str, str]]:
+        patterns = " ".join(f"*{ext}" for ext in PIL.Image.registered_extensions())
+        return [("Image files", patterns)]
+
+    @staticmethod
+    def _create_path_row(
+        frame, label_text: str, var: tk.StringVar, row: int, browse_command
+    ) -> tuple[tk.Widget, tk.Widget, tk.Widget]:
+        label = ttk.Label(frame, text=label_text)
+        entry = ttk.Entry(frame, textvariable=var)
+        button = ttk.Button(frame, text="Browse…", command=browse_command)
+        label.grid(row=row, column=0, sticky="e", padx=(0, 8))
+        entry.grid(row=row, column=1, sticky="ew", padx=(0, 8))
+        button.grid(row=row, column=2, sticky="w")
+        return label, entry, button
+
+    def _browse_source_image(self) -> None:
+        filename = filedialog.askopenfilename(
+            title="Choose a source image",
+            filetypes=self._image_dialog_filetypes(),
+        )
+        if filename:
+            self.source_image_var.set(filename)
+
+    def _browse_mask_image(self) -> None:
+        filename = filedialog.askopenfilename(
+            title="Choose a mask image",
+            filetypes=self._image_dialog_filetypes(),
+        )
+        if filename:
+            self.mask_image_var.set(filename)
+
+    def _get_required_image_tensor(self, path: str, label: str) -> ov.Tensor:
+        if not path:
+            raise ValueError(f"Please choose a {label.lower()}.")
+        if not Path(path).is_file():
+            raise FileNotFoundError(f"{label} not found: {path}")
+        return ImageGenerator._load_image_tensor(path)
+
     def _build_layout(
             self
             ) -> None:
@@ -176,8 +269,22 @@ class DiffusionUI(tk.Tk):
         self.prompt_text.grid(row=0, column=1, sticky="ew", padx=(0, 8))
         self.prompt_text.insert("1.0", self.prompt_var.get())
 
+        mode_frame = ttk.Frame(controls)
+        mode_frame.grid(row=0, column=2, sticky="n", padx=(0, 8))
+
+        ttk.Label(mode_frame, text="Mode:").pack(side="left", padx=(0, 8))
+        self.mode_combo = ttk.Combobox(
+            mode_frame,
+            textvariable=self.mode_var,
+            values=GENERATION_MODES,
+            state="readonly",
+            width=14,
+        )
+        self.mode_combo.pack(side="left")
+        self.mode_var.trace_add("write", self._update_mode_controls)
+
         device_frame = ttk.Frame(controls)
-        device_frame.grid(row=0, column=2, sticky="n", padx=(0, 8))
+        device_frame.grid(row=0, column=3, sticky="n", padx=(0, 8))
 
         ttk.Label(device_frame, text="Device:").pack(side="left", padx=(0, 8))
         self.device_var = tk.StringVar(value="GPU")
@@ -186,7 +293,7 @@ class DiffusionUI(tk.Tk):
         self.device_combo.pack(side="left")
 
         model_frame = ttk.Frame(controls)
-        model_frame.grid(row=0, column=3, sticky="ne", padx=(0, 8))
+        model_frame.grid(row=0, column=4, sticky="ne", padx=(0, 8))
 
         ttk.Label(model_frame, text="Model:").pack(side="left", padx=(0, 8))
         self.model_var = tk.StringVar(value=MODEL_ID.replace("OpenVINO/", ""))
@@ -195,7 +302,7 @@ class DiffusionUI(tk.Tk):
         self.model_combo.pack(side="left")
 
         self.generate_button = ttk.Button(controls, text="Generate", command=self._start_generation)
-        self.generate_button.grid(row=0, column=4, sticky="n", padx=(8, 0))
+        self.generate_button.grid(row=0, column=5, sticky="n", padx=(8, 0))
 
         controls.columnconfigure(1, weight=1)
 
@@ -211,7 +318,6 @@ class DiffusionUI(tk.Tk):
             ("width_var", "Width:", int, 2, 4, 5, 0, 2048, 8),
             ("num_images_var", "Images per Prompt:", int, 3, 0, 1, 0, 10, 8),
                           ("seed_var", "Seed:", int, 3, 2, 3, 0, 2147483647, 12),
-            ("strength_var", "Strength (0-1):", float, 3, 4, 5, 0.0, 1.0, 8),
             ("max_seq_length_var", "Max Sequence Length:", int, 4, 0, 1, 0, 512, 12), ]
 
         text_params = [("negative_prompt_text", "Negative Prompt:", 0, 2, 3),
@@ -226,6 +332,17 @@ class DiffusionUI(tk.Tk):
             setattr(self, attr_name.replace("_var", "_var"), tk.StringVar(value=""))
             self._create_spinbox_field(params_frame, label, getattr(self, attr_name), from_val,
                                        to_val, width, row, col_label, col_widget)
+
+        self.strength_label = ttk.Label(params_frame, text="Strength (0-1):")
+        self.strength_label.grid(row=3, column=4, sticky="e")
+        self.strength_spinbox = ttk.Spinbox(
+            params_frame,
+            from_=0.0,
+            to=1.0,
+            textvariable=self.strength_var,
+            width=8,
+        )
+        self.strength_spinbox.grid(row=3, column=5, sticky="w", padx=(8, 8))
 
         # Create text parameters
         for attr_name, label, row, col_label, col_widget in text_params:
@@ -245,8 +362,27 @@ class DiffusionUI(tk.Tk):
         params_frame.columnconfigure(4, minsize=140)
         params_frame.columnconfigure(5, minsize=100)
 
+        self.image_frame = ttk.LabelFrame(root, text="Input Images", padding=8)
+        self.image_frame.pack(fill="x", pady=(0, 8))
+        self.source_image_row = self._create_path_row(
+            self.image_frame,
+            "Source Image:",
+            self.source_image_var,
+            0,
+            self._browse_source_image,
+        )
+        self.mask_image_row = self._create_path_row(
+            self.image_frame,
+            "Mask Image:",
+            self.mask_image_var,
+            1,
+            self._browse_mask_image,
+        )
+        self.image_frame.columnconfigure(1, weight=1)
+
         self.status_var = tk.StringVar(value="Ready")
-        ttk.Label(root, textvariable=self.status_var).pack(anchor="w", pady=(10, 8))
+        self.status_label = ttk.Label(root, textvariable=self.status_var)
+        self.status_label.pack(anchor="w", pady=(10, 8))
 
         # Progress bar
         self.progress_var = tk.DoubleVar(value=0)
@@ -260,12 +396,11 @@ class DiffusionUI(tk.Tk):
         self.preview_photos: list[ImageTk.PhotoImage] = []
 
         self.prompt_text.focus_set()
+        self._update_mode_controls()
         self.bind("<Control-Return>", lambda
             _event: self._start_generation())
 
-    def _collect_optional_parameters(
-            self
-            ) -> dict:
+    def _collect_optional_parameters(self, mode: str) -> dict:
         """Collect optional parameters from UI and return as kwargs dict."""
         kwargs = {}
 
@@ -299,7 +434,8 @@ class DiffusionUI(tk.Tk):
         add_if_set(self.width_var, "width", int)
         add_if_set(self.num_images_var, "num_images_per_prompt", int)
         add_if_set(self.seed_var, "rng_seed", int)
-        add_if_set(self.strength_var, "strength", float)
+        if mode != "Text2Image":
+            add_if_set(self.strength_var, "strength", float)
         add_if_set(self.max_seq_length_var, "max_sequence_length", int)
 
         return kwargs
@@ -315,19 +451,92 @@ class DiffusionUI(tk.Tk):
         self.generate_button.config(state=tk.DISABLED)
         self.progress_var.set(0)
 
+        selected_mode = self._normalize_mode(self.mode_var.get())
+
         # Check if device or model has changed and recreate generator if needed
         selected_device = self.device_var.get()
         selected_model = get_full_model_id(self.model_var.get())
-        if self.generator.device != selected_device or self.generator.model_id != selected_model:
-            self.generator = ImageGenerator(model_id=selected_model, device=selected_device)
+        if (
+            self.generator.device != selected_device
+            or self.generator.model_id != selected_model
+            or self.generator.mode != selected_mode
+        ):
+            self.generator = ImageGenerator(
+                model_id=selected_model, device=selected_device, mode=selected_mode
+            )
 
-        # Collect optional parameters
-        kwargs = self._collect_optional_parameters()
+        try:
+            # Collect optional parameters
+            kwargs = self._collect_optional_parameters(selected_mode)
+
+            input_image = None
+            mask_image = None
+            if selected_mode in {"Image2Image", "Inpainting"}:
+                input_image = self._get_required_image_tensor(
+                    self.source_image_var.get(), "Source image"
+                )
+            if selected_mode == "Inpainting":
+                mask_image = self._get_required_image_tensor(
+                    self.mask_image_var.get(), "Mask image"
+                )
+        except (ValueError, FileNotFoundError) as error:
+            self.generate_button.config(state=tk.NORMAL)
+            messagebox.showerror("Invalid input", str(error))
+            return
 
         # Run model loading/inference off the UI thread to keep the window responsive.
-        worker = threading.Thread(target=self._generate_in_background, args=(prompt,),
-            kwargs=kwargs, daemon=True, )
+        worker = threading.Thread(
+            target=self._generate_in_background,
+            args=(prompt,),
+            kwargs={
+                **kwargs,
+                "mode": selected_mode,
+                "input_image": input_image,
+                "mask_image": mask_image,
+            },
+            daemon=True,
+        )
         worker.start()
+
+    def _hide_widgets(self, widgets: tuple[tk.Widget, ...]) -> None:
+        for widget in widgets:
+            widget.grid_remove()
+
+    def _show_widgets(self, widgets: tuple[tk.Widget, ...]) -> None:
+        for widget in widgets:
+            widget.grid()
+
+    def _update_mode_controls(self, *_args) -> None:
+        mode = self._normalize_mode(self.mode_var.get())
+
+        if self.image_frame is not None:
+            if mode == "Text2Image":
+                self.image_frame.pack_forget()
+            else:
+                if self.status_label is not None:
+                    self.image_frame.pack(
+                        before=self.status_label, fill="x", pady=(0, 8)
+                    )
+                else:
+                    self.image_frame.pack(fill="x", pady=(0, 8))
+
+        if self.source_image_row is not None:
+            if mode in {"Image2Image", "Inpainting"}:
+                self._show_widgets(self.source_image_row)
+            else:
+                self._hide_widgets(self.source_image_row)
+
+        if self.mask_image_row is not None:
+            if mode == "Inpainting":
+                self._show_widgets(self.mask_image_row)
+            else:
+                self._hide_widgets(self.mask_image_row)
+
+        if self.strength_label is not None and self.strength_spinbox is not None:
+            if mode != "Text2Image":
+                self._show_widgets((self.strength_label, self.strength_spinbox))
+            else:
+                self._hide_widgets((self.strength_label, self.strength_spinbox))
 
     def _generate_in_background(
             self,
@@ -350,11 +559,8 @@ class DiffusionUI(tk.Tk):
         self.after(0, self.status_var.set, text)
 
     def _update_progress_from_worker(
-            self,
-            step: int,
-            num_steps: int,
-            latent: list[Image.Image]
-            ) -> None:
+        self, step: int, num_steps: int, latent: list[Image.Image]
+    ) -> None:
         # Convert step/num_steps to percentage
         gc.collect()
         percentage = (step / num_steps) * 100 if num_steps > 0 else 0
