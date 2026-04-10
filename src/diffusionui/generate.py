@@ -110,11 +110,21 @@ class ImageGenerator:
                 gen_params["mask_image"] = self._load_image_tensor(mask_image)
 
         if progress_callback is not None:
-            gen_params["callback"] = lambda step, num_steps, latent: progress_callback(
-                step,
-                num_steps,
-                [Image.fromarray(img) for img in self.pipeline.decode(latent).data],
-            )
+            # Generation crashes when rendering a latent from Image2Image on GPU
+            disable_latent_preview = mode == "Image2Image" and self.device == "GPU"
+
+            def _progress_callback(step: int, num_steps: int, latent) -> None:
+                if disable_latent_preview:
+                    progress_callback(step, num_steps, [])
+                    return
+
+                progress_callback(
+                    step,
+                    num_steps,
+                    [Image.fromarray(img) for img in self.pipeline.decode(latent).data],
+                )
+
+            gen_params["callback"] = _progress_callback
 
         image_tensor = self.pipeline.generate(prompt, **gen_params)
         print("Generation done")
